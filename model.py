@@ -9,10 +9,10 @@ import numpy as np
 
 def dqsa(input_size, stateful):
     inputs = Input(batch_shape=input_size)
-    lstm = LSTM(units=config.LstmUnits, stateful=stateful, return_sequences=False)
+    lstm = LSTM(units=config.LstmUnits, stateful=stateful, return_sequences=False, activation=relu)
     lstmOutput = lstm(inputs)
-    streamAC = Dense(units=10)(lstmOutput)
-    streamVC = Dense(units=10)(lstmOutput)
+    streamAC = Dense(units=10, activation=relu)(lstmOutput)
+    streamVC = Dense(units=10, activation=relu)(lstmOutput)
     advantage = Dense(units=config.Actions)(streamAC)
     value = Dense(units=1)(streamVC)
     output = value * tf.ones_like(advantage) + tf.subtract(advantage, tf.reduce_mean(advantage, keepdims=True, axis=-1))
