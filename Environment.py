@@ -43,16 +43,20 @@ class Env:
         Reset the Environment at each timestep
         :return: an initial state where all the users has yet to make a choice
         """
+        # this commented out option is what i normally use, a randomized initial state
+        # self.statePerUser = np.matmul(np.ones((1, self.numOfUsers)).T,
+        #                     self.state).copy().astype(dtype=np.float32)  # (Nx1) * (1 X (2K + 2)) -> (Nx(2K+2))
+        # self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
+        # for usr in range(self.numOfUsers):
+        #     action = randrange(start=0, stop=self.numOfChannels + 1)
+        #     self.step(action=action, user=usr)
+        # randomized_first_state = self.statePerUser.astype(dtype=np.float32)
         self.statePerUser = np.matmul(np.ones((1, self.numOfUsers)).T,
-                                      self.state).copy().astype(dtype=np.float32)  # (Nx1) * (1 X (2K + 2)) -> (Nx(2K+2))
+                                      self.state).copy().astype(dtype=np.float32)  # (Nx1) * (1 x (2K + 2)) -> Nx(2K+2)
         self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
-        for usr in range(self.numOfUsers):
-            action = randrange(start=0, stop=self.numOfChannels + 1)
-            self.step(action=action, user=usr)
-        randomized_first_state = self.statePerUser.astype(dtype=np.float32)
-        self.statePerUser = np.matmul(np.ones((1, self.numOfUsers)).T,
-                                      self.state).copy().astype(dtype=np.float32)  # (Nx1) * (1 X (2K + 2)) -> (Nx(2K+2))
-        self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
+        randomized_first_state = np.zeros_like(self.statePerUser)  # according to the matlab script
+        randomized_first_state[:, self.numOfChannels + 1 : 2 * self.numOfChannels + 1] \
+            = self.capacities + np.random.rand(*self.capacities.shape) * 1e-9
         return randomized_first_state
 
     # def step(self, action, user):
@@ -90,14 +94,14 @@ class Env:
             if np.sum(self.statePerUser[:, action]) <= TRANSMISSION:
                 # Channel is been used by only one user there for there is No Collision
                 self.statePerUser[user, -1] = TRANSMISSION  # ACK received
-                # self.statePerUser[:, self.numOfChannels + action] = 0
+                #self.statePerUser[:, self.numOfChannels + action] = 0
                 # The channel is being used so the capacity is zero
             else:  # Collision occurred
                 indicesOfUsersThatChoseTheSameChannel = self.statePerUser[:, action] == TRANSMISSION
                 indicesOfUsersThatChoseTheSameChannel = indicesOfUsersThatChoseTheSameChannel.astype(np.int)
                 # get all the users that transmitted on that channel and turn their ACK signal to 0
                 indicesOfUsersThatChoseTheSameChannel = np.argwhere(indicesOfUsersThatChoseTheSameChannel)
-                # self.statePerUser[:, self.numOfChannels + action] = 1
+                #self.statePerUser[:, self.numOfChannels + action] = 1
                 # the channel is not being used due to a collison so the capacity is one
                 self.statePerUser[indicesOfUsersThatChoseTheSameChannel, -1] = NO_TRANSMISSION  # ACK is zero
 
