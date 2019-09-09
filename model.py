@@ -5,19 +5,7 @@ from tensorflow.python.keras.activations import *
 from config import config
 from Memory import ExperienceReplay
 import numpy as np
-
-
-# def dqsa(input_size, stateful):
-#     inputs = Input(batch_shape=input_size)
-#     lstm = LSTM(units=config.LstmUnits, stateful=stateful, return_sequences=False)
-#     lstmOutput = lstm(inputs)
-#     streamAC = Dense(units=10)(lstmOutput)
-#     streamVC = Dense(units=10)(lstmOutput)
-#     advantage = Dense(units=config.Actions)(streamAC)
-#     value = Dense(units=1)(streamVC)
-#     output = value * tf.ones_like(advantage) + tf.subtract(advantage, tf.reduce_mean(advantage, keepdims=True, axis=-1))
-#     model = Model(inputs=inputs, outputs=output)
-#     return model
+from random import randrange
 
 
 class DQSA(tf.keras.Model):
@@ -29,13 +17,13 @@ class DQSA(tf.keras.Model):
                (usernet = stateful)
         """
         super(DQSA, self).__init__()
-        self.lstm = LSTM(units=config.LstmUnits, stateful=usernet, return_sequences=False, batch_input_shape=input_size)
+        self.lstm = LSTM(units=config.LstmUnits, stateful=usernet, return_sequences=False, batch_input_shape=input_size,
+                         input_shape=(None, config.Actions))
         self.streamAC = Dense(units=10, activation=relu)
         self.streamVC = Dense(units=10, activation=relu)
         self.advantage = Dense(units=config.Actions)
         self.value = Dense(units=1)
         # according to the matlab script we need to get rid of the biases for the deterministic values
-
 
     @tf.function
     def call(self, inputs):
@@ -60,7 +48,6 @@ class DQSA(tf.keras.Model):
     def define_loss(self, loss):
         self.loss = loss
 
-
     def fit(self, lr, ER: ExperienceReplay, centralTarget):
         """
         fitting the model, the current version evaluates the target vector for every time step (while taking into
@@ -74,7 +61,8 @@ class DQSA(tf.keras.Model):
         lossValue = []
         self.optimizer.learning_rate = lr  # deciding the optimizer learning rate
         for _ in range(config.train_iterations):  # usually one
-            seq_len = 50  # following the paper
+            seq_len = config.TimeSlots  # following the paper
+            #  seq_len = randrange(start=5, stop=config.TimeSlots)
             exp_batch = ER.getMiniBatch(batch_size=config.batch_size, seq_length=seq_len)
             states = np.squeeze(np.asarray([exp.state for exp in exp_batch]))
             actions = np.squeeze(np.asarray([exp.action for exp in exp_batch]))
@@ -83,32 +71,50 @@ class DQSA(tf.keras.Model):
             # next_states = np.concatenate((np.expand_dims(states[:, :, 0, :], axis=2), next_states), axis=2)
             # concatenating the first state to the next state sequence to get the "NEXT STATE" expression
             # reshaping the experiences to be ( number_of_users * batch size , 50/51, 2K + 2)
-            # the current version does not support this because we currently use a fixed initial state and not a
-            # randomized one
             states_processed = np.reshape(states, newshape=[-1, states.shape[2], states.shape[3]])
             actions_processed = np.reshape(actions, [-1, actions.shape[2]])
             rewards_processed = np.reshape(rewards, [-1, rewards.shape[2]])
             next_states_processed = np.reshape(next_states, newshape=[-1, next_states.shape[2], next_states.shape[3]])
             # done organizing data to shape (number_of_users * batch size , 50, 2K + 2)
-            grads = []
-            for t in range(1, seq_len):   # going through the time steps we skip the initial state which is fixed
+            for t in range(1, seq_len):   # going through the time steps
                 # according to the matlab code, we got time step by time step and extract the target vector
-                target_next_state_qvalues = centralTarget(next_states_processed[:, : t + 1, :])
-                # no initial fixed state so we dont need to skip the zero element
-                next_state_qvalues = self(next_states_processed[:, :t + 1, :])
+                target_vector = self(states_processed[:, : t+1, :])
+                target_next_state_qvalues = centralTarget(next_states_processed[:, : t+1, :])
+                next_state_qvalues = self(next_states_processed[:, : t+1, :])
                 evaluated_actions = np.argmax(next_state_qvalues, axis=-1).astype(np.int32)
                 double_dqn = np.asarray([Qvalue[evaluated_actions[i]] for i, Qvalue in enumerate(target_next_state_qvalues)])
-                target_vector = rewards_processed[:, t] + config.Gamma * double_dqn  # bellman equation with double dqn
-                one_hot_actions = tf.compat.v1.one_hot(actions_processed[:, t].astype(np.int32), depth=config.Actions)
-                with tf.GradientTape() as tape:  # custom training
-                    current_predictions = self(states_processed[:, 1: t + 1, :])
-                    current_predictions_at_action_chosen = tf.reduce_sum(tf.multiply(current_predictions,
-                                                                                     one_hot_actions), axis=1)
-                    train_loss = self.loss(target_vector, current_predictions_at_action_chosen)
-                # evaluating the gradients with the latest policy
-                grads.append(tape.gradient(train_loss, self.trainable_variables))
+                target_vector = target_vector.numpy()
+                for i, nextQvalue in enumerate(double_dqn):  # creating the labels
+                    target_vector[i, int(actions_processed[i, t])] = rewards_processed[i, t] + config.Gamma * nextQvalue
+                train_loss, gradsEle = self.trainPhase(target_vector, states_processed[:, : t+1, :])
+                if t == 1:
+                    grads = gradsEle
+                else:
+                    for i, grad in enumerate(grads):
+                         grads[i] = self.add(grad, gradsEle[i])
+                    # by default gradient for a batch are added together,
+                    # in the matlab code, we take 4 episodes of 50 time steps each (X) and for each time step
+                    # we calculate the target value(Y), we then sent X and Y ,as labels , to the train function
                 lossValue.append(train_loss)
-            # applying the gradients
-            [self.optimizer.apply_gradients(zip(gradsEle, self.trainable_variables)) for gradsEle in grads]
+        # applying the gradients to change the model's variable --> updating the policy
+        self.applyGradients(grads)
+       # [self.applyGradients(grads) for gradsEle in grads]
+        # grads = np.mean(grads, axis=0)
+        # self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
         return np.mean(lossValue)
 
+    @tf.function
+    def trainPhase(self, target_vector, states):
+        with tf.GradientTape() as tape:
+            current_predictions = self(states)
+            train_loss = self.loss(target_vector, current_predictions)
+        grads = tape.gradient(train_loss, self.trainable_variables)
+        return train_loss, grads
+
+    @tf.function
+    def applyGradients(self, grads):
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+
+    @tf.function
+    def add(self, a, b):
+        return tf.add(a, b)

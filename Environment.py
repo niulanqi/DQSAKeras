@@ -55,32 +55,10 @@ class Env:
                                       self.state).copy().astype(dtype=np.float32)  # (Nx1) * (1 x (2K + 2)) -> Nx(2K+2)
         self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
         randomized_first_state = np.zeros_like(self.statePerUser)  # according to the matlab script
-        randomized_first_state[:, self.numOfChannels + 1 : 2 * self.numOfChannels + 1] \
+        randomized_first_state[:, self.numOfChannels + 1: 2 * self.numOfChannels + 1] \
             = self.capacities + np.random.rand(*self.capacities.shape) * 1e-9
         return randomized_first_state
 
-    # def step(self, action, user):
-    #     """
-    #     :param action: chosen channel or no transmission
-    #     note: the Environment doesn't supply terminal state, that is because the terminal state of each time slot(!)
-    #           is when all the users have chosen a course of action
-    #     """
-    #     assert 0 <= action <= self.numOfChannels
-    #     if action != 0:
-    #         self.statePerUser[user, NO_TRANSMISSION_SLOT] = 0  # the user chose to transmit
-    #         self.statePerUser[user, action] = TRANSMISSION  # the user chose to transmit at channel "action"
-    #         if np.sum(self.statePerUser[:, action]) <= TRANSMISSION:
-    #             # Channel is been used by only one user there for there is No Collision
-    #             self.statePerUser[user, -1] = TRANSMISSION  # ACK received
-    #         else:  # Collision occurred
-    #             indicesOfUsersThatChoseTheSameChannel = self.statePerUser[:, action] == TRANSMISSION
-    #             indicesOfUsersThatChoseTheSameChannel = indicesOfUsersThatChoseTheSameChannel.astype(np.int)
-    #             # get all the users that transmitted on that channel and turn their ACK signal to 0
-    #             indicesOfUsersThatChoseTheSameChannel = np.argwhere(indicesOfUsersThatChoseTheSameChannel)
-    #             self.statePerUser[indicesOfUsersThatChoseTheSameChannel, -1] = NO_TRANSMISSION
-    #     else:  # action means no transmission
-    #         self.statePerUser[user, NO_TRANSMISSION_SLOT] = 1
-    #         self.statePerUser[user, -1] = 0  # ACK signal is 0 when not transmitting
     def step(self, action, user):
         """
         :param action: chosen channel or no transmission
@@ -94,8 +72,7 @@ class Env:
             if np.sum(self.statePerUser[:, action]) <= TRANSMISSION:
                 # Channel is been used by only one user there for there is No Collision
                 self.statePerUser[user, -1] = TRANSMISSION  # ACK received
-                #self.statePerUser[:, self.numOfChannels + action] = 0
-                # The channel is being used so the capacity is zero
+                # self.statePerUser[:, self.numOfChannels + action] = 0 # The channel is being used the capacity is zero
             else:  # Collision occurred
                 indicesOfUsersThatChoseTheSameChannel = self.statePerUser[:, action] == TRANSMISSION
                 indicesOfUsersThatChoseTheSameChannel = indicesOfUsersThatChoseTheSameChannel.astype(np.int)
@@ -104,8 +81,7 @@ class Env:
                 #self.statePerUser[:, self.numOfChannels + action] = 1
                 # the channel is not being used due to a collison so the capacity is one
                 self.statePerUser[indicesOfUsersThatChoseTheSameChannel, -1] = NO_TRANSMISSION  # ACK is zero
-
-        else:  # action means no transmission
+        else:  # means no transmission
             self.statePerUser[user, NO_TRANSMISSION_SLOT] = 1
             self.statePerUser[user, -1] = 0  # ACK signal is 0 when not transmitting
 
@@ -113,11 +89,14 @@ class Env:
         """
         function to return a next state and reward for each user at the end of the time slot after all the users
         have chosen a channel
-        :return: a Vector of [Users, 2K + 3] where the first 2K + 2 elements are the next state and the last element is the reward
+        :return: a Matrix of [Users, 2K + 3] where the first 2K + 2 elements are the next state and the last column
+                is the reward vector
         """
+        self.collisions = 0
         reward_vector = competitive_reward_maximization(self.statePerUser)
-        collison_flag = np.sum(self.statePerUser[:, 1])
-        self.collisions = collison_flag if collison_flag > 1 else 0
+        for channel_idx in range(self.numOfChannels):
+            collison_flag = np.sum(self.statePerUser[:, channel_idx + self.numOfChannels])
+            self.collisions += collison_flag if collison_flag > 1 else 0
         self.idle_times = np.sum(self.statePerUser[:, NO_TRANSMISSION_SLOT])
         return self.statePerUser.astype(dtype=np.float32), reward_vector
 

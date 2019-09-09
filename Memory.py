@@ -1,7 +1,6 @@
 import random
 from collections import namedtuple
 from config import config
-import numpy as np
 
 Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state'])
 SequenceExperience = namedtuple('SequenceExperience', ['state', 'action', 'reward', 'next_state'])
@@ -65,6 +64,6 @@ class ExperienceReplay:
         """
         should flush the experiences each training session
         """
-        self.buffer = []
+        self.buffer.clear()
         self.currentPosition = 0
 
