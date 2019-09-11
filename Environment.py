@@ -105,8 +105,8 @@ class OneTimeStepEnv(Env):
 
     def reset(self):
         state = super(OneTimeStepEnv, self).reset()
-        return np.expand_dims(state, axis=1).copy()
-        # adding the time step dimension in the first axis ( only when Time major is off(!!!!))
+        return np.expand_dims(np.expand_dims(state.copy(), axis=1), axis=1)
+        # adding the time step dimension in the first axis
 
     def getNextState(self):
         nextState, reward_vector = super(OneTimeStepEnv, self).getNextState()

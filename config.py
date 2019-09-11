@@ -24,21 +24,23 @@ class config:
 
     @staticmethod
     def learning_rate_schedule(epoch: int):
-        if epoch <= 50:
+        if epoch <= 500:
             return 5e-3
-        if 50 < epoch <= 100:
+        if 500 < epoch <= 1000:
             return 1e-3
-        if 100 < epoch <= 250:
-            return 1e-4
-        if 250 < epoch <= 500:
-            return 5e-5
-        if 500 < epoch <= 750:
-            return 1e-5
-        if 750 < epoch <= 1000:
-            return 5e-6
         if 1000 < epoch <= 1500:
+            return 5e-4
+        if 1500 < epoch <= 2000:
+            return 1e-4
+        if 2000 < epoch <= 2500:
+            return 5e-5
+        if 2500 < epoch <= 3000:
+            return 1e-5
+        if 3000 < epoch <= 3500:
+            return 5e-6
+        if 3500 < epoch <= 4000:
             return 1e-6
-        if 1500 < epoch <= 2500:
+        if 4000 < epoch <= 4500:
             return 5e-7
         else:
             return 1e-7

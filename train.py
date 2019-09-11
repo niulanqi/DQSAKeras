@@ -95,7 +95,7 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
     userNets = createUserNets(config.N)
     actionThatUsersChose = np.zeros((config.N, 1))
     ER = ExperienceReplay()
-    # channelThroughPutPerTstep = initCTP()  # init the data structure to view the mean reward at each t
+    channelThroughPutPerTstep = initCTP()  # init the data structure to view the mean reward at each t
     for iteration in range(config.Iterations):
         # ----- start iteration loop -----
         if (iteration + 1) % 5 == 0:
@@ -112,7 +112,7 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
             # ----- start episode loop -----
             episodeMemory = Memory(numOfUsers=config.N)  # initialize a memory for the episode
             Xt = env.reset()
-            Xt = np.expand_dims(Xt, axis=1)
+            # Xt = np.expand_dims(Xt, axis=1)
             for tstep in range(config.TimeSlots):
                 # ----- start time-steps loop -----
                 for usr in range(config.N):  # each usr interacts with the env in this loop
@@ -167,14 +167,14 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
         collisonsMean /= config.Episodes // config.debug_freq
         idle_timesMean /= config.Episodes // config.debug_freq
         loss_value = np.mean(loss_value)
-        # if (iteration + 1) % config.debug_freq == 0:
-        #     # every debug freq iterations
-        #     # we draw the mean reward for each time step
-        #     channelThroughPutPerTstep = [np.mean(x) for x in channelThroughPutPerTstep]
-        #     for i, x in enumerate(channelThroughPutPerTstep):
-        #         logs = {'channelThroughputTstep': x}
-        #         Tensorcallback.on_epoch_end(epoch=iteration * (config.TimeSlots + 2) + i, logs=logs)
-        #     channelThroughPutPerTstep = initCTP()  # init the data structure
+        if (iteration + 1) % config.debug_freq == 0:
+            # every debug freq iterations
+            # we draw the mean reward for each time step
+            channelThroughPutPerTstep = [np.mean(x) for x in channelThroughPutPerTstep]
+            for i, x in enumerate(channelThroughPutPerTstep):
+                logs = {'channelThroughputTstep': x}
+                Tensorcallback.on_epoch_end(epoch=iteration * (config.TimeSlots + 2) + i, logs=logs)
+            channelThroughPutPerTstep = initCTP()  # init the data structure
         #  every iteration we draw stuff on TB
         logger.info("Iteration{}/{}: channelThroughput mean is {}, loss {}, collisions is {} and idle_times {}"
                     .format(iteration, config.Iterations, channelThroughPutMean, loss_value, collisonsMean, idle_timesMean))

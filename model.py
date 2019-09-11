@@ -68,7 +68,7 @@ class DQSA(tf.keras.Model):
         actions = np.squeeze(np.asarray([exp.action for exp in exp_batch]))
         next_states = np.squeeze(np.asarray([exp.next_state for exp in exp_batch]))
         rewards = np.squeeze(np.asarray([exp.reward for exp in exp_batch]))
-        # next_states = np.concatenate((np.expand_dims(states[:, :, 0, :], axis=2), next_states), axis=2)
+        next_states = np.concatenate((np.expand_dims(states[:, :, 0, :], axis=2), next_states), axis=2)
         # concatenating the first state to the next state sequence to get the "NEXT STATE" expression
         # reshaping the experiences to be ( number_of_users * batch size , 50/51, 2K + 2)
         states_processed = np.reshape(states, newshape=[-1, states.shape[2], states.shape[3]])
@@ -76,12 +76,16 @@ class DQSA(tf.keras.Model):
         rewards_processed = np.reshape(rewards, [-1, rewards.shape[2]])
         next_states_processed = np.reshape(next_states, newshape=[-1, next_states.shape[2], next_states.shape[3]])
         # done organizing data to shape (number_of_users * batch size , 50, 2K + 2)
-        for t in range(1, seq_len):   # going through the time steps
+        for t in range(seq_len):   # going through the time steps
             # according to the matlab code, we got time step by time step and extract the target vector
+            # tstNextState = next_states_processed[:, : t+2, :]
+            # tstState = states_processed[:, : t+1, :]
+            # tstReward = rewards_processed[:, t]
+            # tstActions = actions_processed[:, t]
             target_vector = self(states_processed[:, : t+1, :])
             # until t + 1 with t + 1 not included meaning --> seq from element 0 to element t
-            target_next_state_qvalues = centralTarget(next_states_processed[:, : t+1, :])
-            next_state_qvalues = self(next_states_processed[:, : t+1, :])
+            target_next_state_qvalues = centralTarget(next_states_processed[:, : t+2, :])
+            next_state_qvalues = self(next_states_processed[:, : t+2, :])
             evaluated_actions = np.argmax(next_state_qvalues, axis=-1).astype(np.int32)
             double_dqn = np.asarray([Qvalue[evaluated_actions[i]] for i, Qvalue in enumerate(target_next_state_qvalues)])
             target_vector = target_vector.numpy()
