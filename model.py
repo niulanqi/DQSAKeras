@@ -8,6 +8,19 @@ import numpy as np
 from random import randrange
 
 
+
+def dqsa(usernet, input_size):
+    input_layer = Input(shape=input_size[1:], batch_size=input_size[0])
+    lstm_layer = PeepholeLSTMCell(units=config.LstmUnits, stateful=usernet, return_sequences=True)(input_layer) # have the ability to learn precise timing
+    streamAC = TimeDistributed(Dense(units=10, activation=tanh), input_shape=(input_size[1], config.LstmUnits))(lstm_layer)
+    streamVC = TimeDistributed(Dense(units=10, activation=tanh), input_shape=(input_size[1], config.LstmUnits))(lstm_layer)
+    advantage = TimeDistributed(Dense(units=config.Actions))(streamAC)
+    value = TimeDistributed(Dense(units=1))(streamVC)
+    pred = value + advantage - tf.reduce_mean(advantage)
+    model = Model(inputs=input_layer, outputs=pred)
+    return model
+
+
 class DQSA(tf.keras.Model):
     def __init__(self, input_size, usernet):
         """
@@ -23,6 +36,7 @@ class DQSA(tf.keras.Model):
         self.streamVC = Dense(units=10, activation=tanh)
         self.advantage = Dense(units=config.Actions)
         self.value = Dense(units=1)
+        self.pred = Add()
         # according to the matlab script we need to get rid of the biases for the deterministic values
 
     @tf.function
@@ -38,8 +52,8 @@ class DQSA(tf.keras.Model):
         streamAC = self.streamAC(lstmOutput)
         advantage = self.advantage(streamAC)
         value = self.value(streamVC)
-        pred = value * tf.ones_like(advantage) + tf.subtract(advantage,
-                                                             tf.reduce_mean(advantage, keepdims=True, axis=-1))
+        pred = self.pred([value * tf.ones_like(advantage), tf.subtract(advantage,
+                                                          tf.reduce_mean(advantage, keepdims=True, axis=-1))])
         return pred
 
     def define_optimizer(self, optimizer):
@@ -82,7 +96,7 @@ class DQSA(tf.keras.Model):
             # tstState = states_processed[:, : t+1, :]
             # tstReward = rewards_processed[:, t]
             # tstActions = actions_processed[:, t]
-            target_vector = self(states_processed[:, : t+1, :])
+            target_vector = self(states_processed[:, : t + 1, :])
             # until t + 1 with t + 1 not included meaning --> seq from element 0 to element t
             target_next_state_qvalues = centralTarget(next_states_processed[:, : t+2, :])
             next_state_qvalues = self(next_states_processed[:, : t+2, :])
@@ -125,3 +139,65 @@ class DQSA(tf.keras.Model):
     @tf.function
     def add(self, a, b):
         return tf.add(a, b)
+
+
+class DQSAVersion2:
+    def __init__(self, input_size, usernet, optimizer=tf.compat.v2.optimizers.Adam(), loss=tf.compat.v2.losses.mean_squared_error):
+        self.model = dqsa(usernet, input_size)
+        self.model.compile(optimizer=optimizer, loss=loss)
+
+    @tf.function
+    def __call__(self, inputs):
+        return self.model(inputs)
+
+    def fit(self, lr, ER: ExperienceReplay, centralTarget):
+        """
+        fitting the model, the current version evaluates the target vector for every time step (while taking into
+        consideration the sequence leading to that time step), the target vector is evaluated using the latest policy
+        once we evaluate the entire target vector, we apply backprop with that target vector
+        :param lr: learning rate
+        :param ER: Experience Replay
+        :param centralTarget: central target
+        :return: mean loss value
+        """
+        lossValue = []
+        self.model.optimizer.learning_rate = lr  # deciding the optimizer learning rate
+        for _ in range(config.train_iterations):
+            seq_len = config.TimeSlots  # following the paper
+            #  seq_len = randrange(start=5, stop=config.TimeSlots)
+            exp_batch = ER.getMiniBatch(batch_size=config.batch_size, seq_length=seq_len)
+            states = np.squeeze(np.asarray([exp.state for exp in exp_batch]))
+            actions = np.squeeze(np.asarray([exp.action for exp in exp_batch]))
+            next_states = np.squeeze(np.asarray([exp.next_state for exp in exp_batch]))
+            rewards = np.squeeze(np.asarray([exp.reward for exp in exp_batch]))
+            next_states = np.concatenate((np.expand_dims(states[:, :, 0, :], axis=2), next_states), axis=2)
+            # concatenating the first state to the next state sequence to get the "NEXT STATE" expression
+            # reshaping the experiences to be ( number_of_users * batch size , 50/51, 2K + 2)
+            states_processed = np.reshape(states, newshape=[-1, states.shape[2], states.shape[3]])
+            actions_processed = np.reshape(actions, [-1, actions.shape[2]])
+            rewards_processed = np.reshape(rewards, [-1, rewards.shape[2]])
+            next_states_processed = np.reshape(next_states, newshape=[-1, next_states.shape[2], next_states.shape[3]])
+            # done organizing data to shape (number_of_users * batch size , 50, 2K + 2)
+            target_vector = self(states_processed)
+            target_vector = target_vector.numpy()
+            next_state_qvalues = self(next_states_processed)
+            next_state_qvalues = next_state_qvalues[:, 1:, :].numpy()
+            next_state_qvalues_target = centralTarget(next_states_processed)
+            next_state_qvalues_target = next_state_qvalues_target[:, 1:, :].numpy()
+            evaluated_actions = np.argmax(next_state_qvalues, axis=-1).astype(np.int32)
+            for t in range(seq_len):
+                double_dqn = np.asarray([Qvalue[evaluated_actions[i, t]] for i, Qvalue in enumerate(next_state_qvalues_target[:, t, :])])
+                for i, nextQvalue in enumerate(double_dqn):  # creating the labels
+                    target_vector[i, t, int(actions_processed[i, t])] = rewards_processed[i, t] + config.Gamma * nextQvalue
+            loss = self.model.train_on_batch(x=states_processed, y=target_vector)
+            lossValue.append(loss)
+        return np.mean(lossValue)
+
+    def reset_states(self):
+        self.model.reset_states()
+
+    def load_weights(self, path):
+        self.model.load_weights(filepath=path)
+
+    def save_weights(self, path):
+        self.model.save_weights(filepath=path)

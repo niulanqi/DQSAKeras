@@ -2,7 +2,7 @@ import tensorflow as tf
 from tensorflow.python.keras import callbacks
 from config import config
 import os
-from model import DQSA
+from model import DQSA, DQSAVersion2
 from logger_utils import get_logger
 from Environment import OneTimeStepEnv
 import numpy as np
@@ -17,7 +17,8 @@ import math
 def createUserNets(users):
     userNets = []
     for usr in range(users):
-        userNets.append(DQSA(input_size=config.input_size_user, usernet=True))
+       # userNets.append(DQSA(input_size=config.input_size_user, usernet=True))
+        userNets.append(DQSAVersion2(input_size=config.input_size_user, usernet=True))
     return userNets
 
 
@@ -39,20 +40,22 @@ def initialize_history_input(users, env):
     return history_input
 
 
-def synchWithCentral(userNets):
+def synchWithCentral(userNets, path=config.ckpt_path):
     """
     :param userNets:
     :return: userNets synched with central
     """
     for usr in userNets:
-        usr.load_weights(config.ckpt_path)
+        usr.load_weights(path)
 
-def initCTP():
-    channelThroughPutPerTstep = [[] for _ in range(config.TimeSlots + 2)]  # to restart each session we start and end
+
+def initCTP(time_slots=config.TimeSlots):
+    channelThroughPutPerTstep = [[] for _ in range(time_slots + 2)]  # to restart each session we start and end
                                                                            # with zero
     channelThroughPutPerTstep[0].append(0)
     channelThroughPutPerTstep[-1].append(0)
     return channelThroughPutPerTstep
+
 
 def resetUserStates(userNets):
     """
@@ -72,11 +75,12 @@ def getAction(Qvalues, temperature, alpha):
     softmaxValues = tf.nn.softmax(logits=(Qvalues - np.max(Qvalues) * np.ones_like(Qvalues)) * temperature)
     action_dist = (1 - alpha) * softmaxValues + alpha * (1 / config.Actions) * (np.ones_like(softmaxValues))
     action = np.squeeze(np.random.choice(config.Actions, p=np.squeeze(action_dist).ravel()))
+    # action = np.argmax(action_dist)
     return action
 
 
 def lower_epsilon(alpha):
-    return max(0.000005, alpha * 0.995)
+    return max(0, alpha * 0.995)
 
 
 def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
@@ -90,9 +94,10 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
     logger.info("start_training")
     Tensorcallback = callbacks['tensorboard']
     env = OneTimeStepEnv()
-    alpha = 0.05  # e_greedy
+    alpha = 1.0
     beta = 1
     userNets = createUserNets(config.N)
+    synchWithCentral(userNets=userNets, path=config.load_ckpt_path)
     actionThatUsersChose = np.zeros((config.N, 1))
     ER = ExperienceReplay()
     channelThroughPutPerTstep = initCTP()  # init the data structure to view the mean reward at each t
@@ -115,22 +120,26 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
             # Xt = np.expand_dims(Xt, axis=1)
             for tstep in range(config.TimeSlots):
                 # ----- start time-steps loop -----
-                for usr in range(config.N):  # each usr interacts with the env in this loop
+                for usr in range(config.N):  # each usr interacts with the env in this loo
                     usr_state = Xt[usr]
                     Qvalues = userNets[usr](usr_state)  # inserting the state to the stateful DQSA
-                    action = getAction(Qvalues=Qvalues, temperature=beta, alpha=alpha)
+                    action = getAction(Qvalues=np.squeeze(Qvalues), temperature=beta, alpha=alpha)
                     actionThatUsersChose[usr] = action  # saving the action at time step tstep
                     env.step(action=action, user=usr)  # each user interact with the env by choosing an action
                 nextStateForEachUser, rewardForEachUser = env.getNextState()  # also resets the env for the next t step
+                tmp = np.max(rewardForEachUser, axis=-1) * np.ones_like(rewardForEachUser)
+                if tmp[0] > 0:
+                    tansmitting_index = np.argmax(rewardForEachUser, axis=-1)
+                    tmp[tansmitting_index] += (config.N - 1)
                 episodeMemory.addTimeStepExperience(state=Xt, nextState=nextStateForEachUser,
-                                                    rewards=rewardForEachUser, actions=np.squeeze(actionThatUsersChose))
+                                                    rewards=tmp, actions=np.squeeze(actionThatUsersChose))
                 # accumulating the experience at time step tstep
                 Xt = np.expand_dims(nextStateForEachUser, axis=1)  # state = next_State
                 # for debug purposes
                 collisons += env.collisions
                 idle_times += env.idle_times
                 reward_sum = np.sum(rewardForEachUser)  # rewards are calculated by the ACK signal as competitive reward mechanism
-                # channelThroughPutPerTstep[tstep + 1].append(reward_sum)
+                channelThroughPutPerTstep[tstep + 1].append(reward_sum)
                 channelThroughPut += reward_sum
                 # ----- end time-steps loop -----
             # the episode has ended so we add the episode memory to ER and reset the usr states
@@ -143,7 +152,7 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
                 channelThroughPutMean += channelThroughPut
                 collisonsMean += collisons
                 idle_timesMean += idle_times
-                tstlearningrate = centralNet.optimizer.learning_rate.numpy()
+                tstlearningrate = centralNet.model.optimizer.learning_rate.numpy()
                 logger.info(
                     "Iteration {}/{}- Episode {}/{}:  collisions {}, idle_times {} ,channelThroughput is {}, learning rate is {}, beta is {} and alpha is {}"
                     .format(iteration, config.Iterations, episode, config.Episodes, collisons,
@@ -156,7 +165,7 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
                 idle_times = 0
                 channelThroughPut = 0
             if (ER.currentPosition) % config.M == 0:  # training phase every M episodes
-                loss = centralNet.fit(lr=config.learning_rate_schedule(iteration), centralTarget=centralTarget, ER=ER)
+                loss = centralNet.fit(lr=config.learning_rate_schedule(iteration) * config.learning_rate_multiplier, centralTarget=centralTarget, ER=ER)
                 loss_value.append(loss)
                 centralNet.save_weights(config.ckpt_path)  # save new weights (new policy) in ckpt_path
                 ER.flush()  # clear out the ER after use
@@ -194,14 +203,19 @@ if __name__ == '__main__':
     if not os.path.exists(config.model_path):
             os.makedirs(config.model_path)
     optimizer = tf.compat.v2.optimizers.Adam()
-    centralNet = DQSA(input_size=config.input_size_central, usernet=False)
+    # centralNet = DQSA(input_size=config.input_size_central, usernet=False)
     loss = tf.compat.v2.losses.mean_squared_error
-    centralNet.define_loss(loss=loss)
-    centralNet.define_optimizer(optimizer=optimizer)
+    centralNet = DQSAVersion2(input_size=config.input_size_central, usernet=False, optimizer=optimizer,
+                              loss=loss)
+    # centralNet.define_loss(loss=loss)
+    # centralNet.define_optimizer(optimizer=optimizer)
     logger = get_logger(os.path.join(config.log_dir, "train_log"))
     Tensorcallback = callbacks.TensorBoard(config.log_dir,
-                                           write_graph=False, write_images=False)
-    Tensorcallback.set_model(centralNet)
+                                           write_graph=True, write_images=False)
+    Tensorcallback.set_model(centralNet.model)
     callbacks = {'tensorboard': Tensorcallback}
-    DQSATarget = DQSA(input_size=config.input_size_central, usernet=False)
+    DQSATarget = DQSAVersion2(input_size=config.input_size_central, usernet=False, optimizer=optimizer,
+                              loss=loss)
+    # centralNet.load_weights(path=config.load_ckpt_path)
+    # DQSATarget.load_weights(path=config.load_ckpt_path)
     trainDqsa(callbacks, logger, centralNet, DQSATarget)

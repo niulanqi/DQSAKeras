@@ -16,6 +16,11 @@ def competitive_reward_maximization(userVector):
     return userVector[:, -1]
 
 
+def collabrative_reward_maximization(userVector):
+    return userVector[:, -1]
+
+
+
 class Env:
 
     def __init__(self, numOfChannels=config.K, numOfUsers=config.N):
@@ -56,7 +61,7 @@ class Env:
         self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
         randomized_first_state = np.zeros_like(self.statePerUser)  # according to the matlab script
         randomized_first_state[:, self.numOfChannels + 1: 2 * self.numOfChannels + 1] \
-            = self.capacities + np.random.rand(*self.capacities.shape) * 1e-9
+            = self.capacities
         return randomized_first_state
 
     def step(self, action, user):
@@ -72,13 +77,13 @@ class Env:
             if np.sum(self.statePerUser[:, action]) <= TRANSMISSION:
                 # Channel is been used by only one user there for there is No Collision
                 self.statePerUser[user, -1] = TRANSMISSION  # ACK received
-                # self.statePerUser[:, self.numOfChannels + action] = 0 # The channel is being used the capacity is zero
+                self.statePerUser[:, self.numOfChannels + action] = 0  # The channel is being used the capacity is zero
             else:  # Collision occurred
                 indicesOfUsersThatChoseTheSameChannel = self.statePerUser[:, action] == TRANSMISSION
                 indicesOfUsersThatChoseTheSameChannel = indicesOfUsersThatChoseTheSameChannel.astype(np.int)
                 # get all the users that transmitted on that channel and turn their ACK signal to 0
                 indicesOfUsersThatChoseTheSameChannel = np.argwhere(indicesOfUsersThatChoseTheSameChannel)
-                #self.statePerUser[:, self.numOfChannels + action] = 1
+                self.statePerUser[:, self.numOfChannels + action] = 1
                 # the channel is not being used due to a collison so the capacity is one
                 self.statePerUser[indicesOfUsersThatChoseTheSameChannel, -1] = NO_TRANSMISSION  # ACK is zero
         else:  # means no transmission

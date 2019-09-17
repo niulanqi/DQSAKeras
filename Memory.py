@@ -58,7 +58,10 @@ class ExperienceReplay:
 
     def getMiniBatch(self, seq_length,  batch_size=config.batch_size):
         indices = random.sample(population=range(len(self.buffer)), k=min(batch_size, len(self.buffer)))
-        return [self.buffer[index].withdrawSequenceOfExperiences(seq_length=seq_length) for index in indices]
+        experiences = [self.buffer[index].withdrawSequenceOfExperiences(seq_length=seq_length) for index in indices]
+        for i in sorted(indices, reverse=True):
+            del self.buffer[i]
+        return experiences
 
     def flush(self):
         """
