@@ -97,7 +97,7 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
     alpha = 1.0
     beta = 1
     userNets = createUserNets(config.N)
-    synchWithCentral(userNets=userNets, path=config.load_ckpt_path)
+    # synchWithCentral(userNets=userNets, path=config.load_ckpt_path)
     actionThatUsersChose = np.zeros((config.N, 1))
     ER = ExperienceReplay()
     channelThroughPutPerTstep = initCTP()  # init the data structure to view the mean reward at each t
@@ -127,10 +127,10 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
                     actionThatUsersChose[usr] = action  # saving the action at time step tstep
                     env.step(action=action, user=usr)  # each user interact with the env by choosing an action
                 nextStateForEachUser, rewardForEachUser = env.getNextState()  # also resets the env for the next t step
-                tmp = np.max(rewardForEachUser, axis=-1) * np.ones_like(rewardForEachUser)
+                tmp = np.max(rewardForEachUser, axis=-1) * np.ones_like(rewardForEachUser) # motivates the users to share the channel
                 if tmp[0] > 0:
                     tansmitting_index = np.argmax(rewardForEachUser, axis=-1)
-                    tmp[tansmitting_index] += (config.N - 1)
+                    tmp[tansmitting_index] += (config.N - 1) # motivating the users to transmit
                 episodeMemory.addTimeStepExperience(state=Xt, nextState=nextStateForEachUser,
                                                     rewards=tmp, actions=np.squeeze(actionThatUsersChose))
                 # accumulating the experience at time step tstep

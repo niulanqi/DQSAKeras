@@ -6,12 +6,14 @@ from config import config
 from Memory import ExperienceReplay
 import numpy as np
 from random import randrange
+from PeepholesLSTM import PeepholesLSTM
 
 
 
 def dqsa(usernet, input_size):
     input_layer = Input(shape=input_size[1:], batch_size=input_size[0])
-    lstm_layer = PeepholeLSTMCell(units=config.LstmUnits, stateful=usernet, return_sequences=True)(input_layer) # have the ability to learn precise timing
+    #lstm_layer = LSTM(units=config.LstmUnits, stateful=usernet, return_sequences=True)(input_layer)
+    lstm_layer = PeepholesLSTM(units=config.LstmUnits, stateful=usernet, return_sequences=True)(input_layer) # allows better timing
     streamAC = TimeDistributed(Dense(units=10, activation=tanh), input_shape=(input_size[1], config.LstmUnits))(lstm_layer)
     streamVC = TimeDistributed(Dense(units=10, activation=tanh), input_shape=(input_size[1], config.LstmUnits))(lstm_layer)
     advantage = TimeDistributed(Dense(units=config.Actions))(streamAC)
