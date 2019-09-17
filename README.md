@@ -16,6 +16,7 @@ DQSA in tensorflow 2.0
 3) *model.py* - this module holds the DQSA model, the important method in this module is the "fit" method, it decides the optimizer learning rate
                 and extracts batch size of memories from the ER, afterwards, we evaluate the target vector for each time step and calculate the gradients(without updating the policy)
                 after we calculated the gradients for each time step we apply the gradients(update the policy)
+                the model also holds the DQSAversion2, which is a different, much more efficient approach to the DQSA                    implementation, using the return sequence property we are able to calculate the target vector for the entire sequence in one stroke.
 4) *train.py* - the main program, we first create the user and central network and then we start the main function called "trainDqsa".
                 in the "trainDqsa" function we follow the algorithm in the DQSA paper with the exception of choosing the action ( we use the formula that is given to us in the matlab code).
                 all the users have identical stateful DQSA, at each time step each user evaluates an action through the DQSA (using the state from the last timestep
