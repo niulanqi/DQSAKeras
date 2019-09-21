@@ -41,6 +41,7 @@ class Env:
         #   1 means transmission
         #   > 1 means collison
         self.statePerUser = np.matmul(np.ones((1, self.numOfUsers)).T, self.state).copy().astype(dtype=np.float32)   # (Nx1) * (1 X (2K + 2)) -> (Nx(2K+2))
+        self.reward_vector = np.zeros(self.numOfUsers)
         # self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
 
     def reset(self):
@@ -62,6 +63,7 @@ class Env:
         randomized_first_state = np.zeros_like(self.statePerUser)  # according to the matlab script
         randomized_first_state[:, self.numOfChannels + 1: 2 * self.numOfChannels + 1] \
             = self.capacities
+        self.reward_vector = np.zeros(self.numOfUsers)
         return randomized_first_state
 
     def step(self, action, user):
@@ -78,6 +80,7 @@ class Env:
                 # Channel is been used by only one user there for there is No Collision
                 self.statePerUser[user, -1] = TRANSMISSION  # ACK received
                 self.statePerUser[:, self.numOfChannels + action] = 0  # The channel is being used the capacity is zero
+                self.reward_vector[:] = 1
             else:  # Collision occurred
                 indicesOfUsersThatChoseTheSameChannel = self.statePerUser[:, action] == TRANSMISSION
                 indicesOfUsersThatChoseTheSameChannel = indicesOfUsersThatChoseTheSameChannel.astype(np.int)
@@ -86,6 +89,7 @@ class Env:
                 self.statePerUser[:, self.numOfChannels + action] = 1
                 # the channel is not being used due to a collison so the capacity is one
                 self.statePerUser[indicesOfUsersThatChoseTheSameChannel, -1] = NO_TRANSMISSION  # ACK is zero
+                self.reward_vector[:] = 0
         else:  # means no transmission
             self.statePerUser[user, NO_TRANSMISSION_SLOT] = 1
             self.statePerUser[user, -1] = 0  # ACK signal is 0 when not transmitting
@@ -98,25 +102,26 @@ class Env:
                 is the reward vector
         """
         self.collisions = 0
-        reward_vector = competitive_reward_maximization(self.statePerUser)
+        # reward_vector = competitive_reward_maximization(self.statePerUser)
         for channel_idx in range(self.numOfChannels):
             collison_flag = np.sum(self.statePerUser[:, channel_idx + self.numOfChannels])
             self.collisions += collison_flag if collison_flag > 1 else 0
         self.idle_times = np.sum(self.statePerUser[:, NO_TRANSMISSION_SLOT])
-        return self.statePerUser.astype(dtype=np.float32), reward_vector
+        return self.statePerUser.astype(dtype=np.float32), self.reward_vector, self.statePerUser[:, -1]
 
 
 class OneTimeStepEnv(Env):
 
     def reset(self):
         state = super(OneTimeStepEnv, self).reset()
-        return np.expand_dims(np.expand_dims(state.copy(), axis=1), axis=1)
+        #return np.expand_dims(np.expand_dims(state.copy(), axis=1), axis=1)
+        return np.expand_dims(state.copy(), axis=1)
         # adding the time step dimension in the first axis
 
     def getNextState(self):
-        nextState, reward_vector = super(OneTimeStepEnv, self).getNextState()
+        nextState, reward_vector, ack_vector = super(OneTimeStepEnv, self).getNextState()
         self.reset()
-        return np.expand_dims(nextState, axis=1).copy(), reward_vector
+        return np.expand_dims(nextState, axis=1).copy(), reward_vector, ack_vector
 
 #
 #

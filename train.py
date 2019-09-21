@@ -2,51 +2,47 @@ import tensorflow as tf
 from tensorflow.python.keras import callbacks
 from config import config
 import os
-from model import DQSA, DQSAVersion2
+from model import DQSAVersion2
 from logger_utils import get_logger
 from Environment import OneTimeStepEnv
 import numpy as np
 from Memory import ExperienceReplay, Memory
 from collections import deque
-from random import randrange
-import time
-import math
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 
 
-def createUserNets(users):
-    userNets = []
-    for usr in range(users):
-       # userNets.append(DQSA(input_size=config.input_size_user, usernet=True))
-        userNets.append(DQSAVersion2(input_size=config.input_size_user, usernet=True))
-    return userNets
+# def createUserNets(users):
+#     userNets = []
+#     for usr in range(users):
+#        # userNets.append(DQSA(input_size=config.input_size_user, usernet=True))
+#         userNets.append(DQSAVersion2(input_size=config.input_size_user, usernet=True))
+#     return userNets
+#
+#
+# def initialize_history_input(users, env):
+#     """
+#     this function is suitable when config.useUserHistory is True
+#     :param users: number of users
+#     :param env:
+#     :return: an initialized history
+#     """
+#     history_input = deque(maxlen=config.usrTimeSteps)
+#     for tstep in range(config.usrTimeSteps):
+#         # for usr in range(users):
+#         #     rand_action = randrange(start=0, stop=config.Actions)
+#         #     env.step(action=rand_action, user=usr)
+#         # nextStateForEachUser, _ = env.getNextState()  # also resets the environment
+#         nextStateForEachUser = np.zeros((users, 1, 2 * config.K + 2)).astype(dtype=np.float32)
+#         history_input.append(nextStateForEachUser)
+#     return history_input
 
-
-def initialize_history_input(users, env):
-    """
-    this function is suitable when config.useUserHistory is True
-    :param users: number of users
-    :param env:
-    :return: an initialized history
-    """
-    history_input = deque(maxlen=config.usrTimeSteps)
-    for tstep in range(config.usrTimeSteps):
-        # for usr in range(users):
-        #     rand_action = randrange(start=0, stop=config.Actions)
-        #     env.step(action=rand_action, user=usr)
-        # nextStateForEachUser, _ = env.getNextState()  # also resets the environment
-        nextStateForEachUser = np.zeros((users, 1, 2 * config.K + 2)).astype(dtype=np.float32)
-        history_input.append(nextStateForEachUser)
-    return history_input
-
-
-def synchWithCentral(userNets, path=config.ckpt_path):
-    """
-    :param userNets:
-    :return: userNets synched with central
-    """
-    for usr in userNets:
-        usr.load_weights(path)
+#
+# def synchWithCentral(userNets, path=config.ckpt_path):
+#     """
+#     :param userNets:
+#     :return: userNets synched with central
+#     """
+#     for usr in userNets:
+#         usr.load_weights(path)
 
 
 def initCTP(time_slots=config.TimeSlots):
@@ -83,7 +79,7 @@ def lower_epsilon(alpha):
     return max(0, alpha * 0.995)
 
 
-def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
+def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVersion2):
     """
     training loop for the DQSA
     :param callbacks: callbacks to write to TB
@@ -96,9 +92,10 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
     env = OneTimeStepEnv()
     alpha = 1.0
     beta = 1
-    userNets = createUserNets(config.N)
+    #userNets = createUserNets(config.N)
+    userNet = DQSAVersion2(input_size=config.input_size_user, usernet=True)
     # synchWithCentral(userNets=userNets, path=config.load_ckpt_path)
-    actionThatUsersChose = np.zeros((config.N, 1))
+    # actionThatUsersChose = np.zeros((config.N, 1))
     ER = ExperienceReplay()
     channelThroughPutPerTstep = initCTP()  # init the data structure to view the mean reward at each t
     for iteration in range(config.Iterations):
@@ -117,34 +114,35 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
             # ----- start episode loop -----
             episodeMemory = Memory(numOfUsers=config.N)  # initialize a memory for the episode
             Xt = env.reset()
+            userNet.reset_states()
             # Xt = np.expand_dims(Xt, axis=1)
             for tstep in range(config.TimeSlots):
                 # ----- start time-steps loop -----
-                for usr in range(config.N):  # each usr interacts with the env in this loo
-                    usr_state = Xt[usr]
-                    Qvalues = userNets[usr](usr_state)  # inserting the state to the stateful DQSA
-                    action = getAction(Qvalues=np.squeeze(Qvalues), temperature=beta, alpha=alpha)
-                    actionThatUsersChose[usr] = action  # saving the action at time step tstep
-                    env.step(action=action, user=usr)  # each user interact with the env by choosing an action
-                nextStateForEachUser, rewardForEachUser = env.getNextState()  # also resets the env for the next t step
-                tmp = np.max(rewardForEachUser, axis=-1) * np.ones_like(rewardForEachUser) # motivates the users to share the channel
-                if tmp[0] > 0:
-                    tansmitting_index = np.argmax(rewardForEachUser, axis=-1)
-                    tmp[tansmitting_index] += (config.N - 1) # motivating the users to transmit
+                UserQvalues = userNet(Xt)
+                actionThatUsersChose = [getAction(Qvalues=UserQvalue, temperature=beta, alpha=alpha) for UserQvalue in UserQvalues]
+                for usr in range(config.N):
+                    env.step(action=actionThatUsersChose[usr], user=usr)
+                # for usr in range(config.N):  # each usr interacts with the env in this loo
+                #     usr_state = Xt[usr]
+                #     Qvalues = userNets[usr](usr_state)  # inserting the state to the stateful DQSA
+                #     action = getAction(Qvalues=np.squeeze(Qvalues), temperature=beta, alpha=alpha)
+                #     actionThatUsersChose[usr] = action  # saving the action at time step tstep
+                #     env.step(action=action, user=usr)  # each user interact with the env by choosing an action
+                nextStateForEachUser, rewardForEachUser, ack_vector = env.getNextState()  # also resets the env for the next t step
                 episodeMemory.addTimeStepExperience(state=Xt, nextState=nextStateForEachUser,
-                                                    rewards=tmp, actions=np.squeeze(actionThatUsersChose))
+                                                    rewards=rewardForEachUser, actions=np.squeeze(actionThatUsersChose))
                 # accumulating the experience at time step tstep
-                Xt = np.expand_dims(nextStateForEachUser, axis=1)  # state = next_State
+                Xt = nextStateForEachUser  # state = next_State
                 # for debug purposes
                 collisons += env.collisions
                 idle_times += env.idle_times
-                reward_sum = np.sum(rewardForEachUser)  # rewards are calculated by the ACK signal as competitive reward mechanism
-                channelThroughPutPerTstep[tstep + 1].append(reward_sum)
-                channelThroughPut += reward_sum
+                ack_sum = np.sum(ack_vector)  # rewards are calculated by the ACK signal as competitive reward mechanism
+                channelThroughPutPerTstep[tstep + 1].append(ack_sum)
+                channelThroughPut += ack_sum
                 # ----- end time-steps loop -----
             # the episode has ended so we add the episode memory to ER and reset the usr states
             ER.add_memory(memory=episodeMemory)  # after the tstep loop we insert the episode experience into the ER
-            resetUserStates(userNets)  # reset the user's lstm states
+            #resetUserStates(userNets)  # reset the user's lstm states
             if (episode + 1) % config.debug_freq == 0:  # for debugging purposes, please ignore
                 collisons /= config.TimeSlots * config.debug_freq
                 idle_times /= config.TimeSlots * config.debug_freq
@@ -169,14 +167,15 @@ def trainDqsa(callbacks, logger, centralNet:DQSA, centralTarget:DQSA):
                 loss_value.append(loss)
                 centralNet.save_weights(config.ckpt_path)  # save new weights (new policy) in ckpt_path
                 ER.flush()  # clear out the ER after use
-                synchWithCentral(userNets)  # sync with central to get the new policy
+                #synchWithCentral(userNets)  # sync with central to get the new policy
+                userNet.load_weights(path=config.ckpt_path)
                 # resetUserStates(userNets)  # reset the user's lstm states
         # ----- end episode loop -----
         channelThroughPutMean /= config.Episodes // config.debug_freq
         collisonsMean /= config.Episodes // config.debug_freq
         idle_timesMean /= config.Episodes // config.debug_freq
         loss_value = np.mean(loss_value)
-        if (iteration + 1) % config.debug_freq == 0:
+        if (iteration + 1) % 5 == 0:
             # every debug freq iterations
             # we draw the mean reward for each time step
             channelThroughPutPerTstep = [np.mean(x) for x in channelThroughPutPerTstep]

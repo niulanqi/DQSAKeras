@@ -2,20 +2,20 @@
 class config:
     N = 3  # number of users
     K = 1  # number of channels
-    TimeSlots = 50
+    TimeSlots = 75
     TimeSlotsEvaluate = 200
     Actions = K + 1
     batch_size = 8
-    M = batch_size * 3
+    M = batch_size
     train_iterations = 1
     usrTimeSteps = 1
-    input_size_user = (1, usrTimeSteps, 2 * K + 2)  # the paper state that there is only (2K+2) X 100
+    input_size_user = (3, usrTimeSteps, 2 * K + 2)  # the paper state that there is only (2K+2) X 100
     central_first_axis = batch_size * N
     input_size_central = (None, None, 2 * K + 2)
-    model_path = r'saved_models/network_central_continue'
+    model_path = r'saved_models/network_central'
     log_dir = r'log_dir/'
-    evaluate_log_dir=r'log_dir'
-    ckpt_path =r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central/checkpoint'
+    evaluate_log_dir = r'log_dir'
+    ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central/checkpoint'
     load_ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central/checkpoint'
     Iterations = 10000
     Episodes = 100
