@@ -9,10 +9,8 @@ from random import randrange
 from PeepholesLSTM import PeepholesLSTM
 
 
-
 def dqsa(usernet, input_size):
     input_layer = Input(shape=input_size[1:], batch_size=input_size[0])
-    #lstm_layer = LSTM(units=config.LstmUnits, stateful=usernet, return_sequences=True)(input_layer)
     lstm_layer = PeepholesLSTM(units=config.LstmUnits, stateful=usernet, return_sequences=True)(input_layer) # allows better timing
     streamAC = TimeDistributed(Dense(units=10, activation=tanh), input_shape=(input_size[1], config.LstmUnits))(lstm_layer)
     streamVC = TimeDistributed(Dense(units=10, activation=tanh), input_shape=(input_size[1], config.LstmUnits))(lstm_layer)
@@ -203,3 +201,7 @@ class DQSAVersion2:
 
     def save_weights(self, path):
         self.model.save_weights(filepath=path)
+
+    @tf.function
+    def train_phase(self, x, y):
+        return self.model.train_on_batch(x=x, y=y)

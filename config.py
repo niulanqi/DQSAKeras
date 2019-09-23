@@ -5,18 +5,18 @@ class config:
     TimeSlots = 75
     TimeSlotsEvaluate = 200
     Actions = K + 1
-    batch_size = 8
+    batch_size = 4
     M = batch_size
     train_iterations = 1
     usrTimeSteps = 1
-    input_size_user = (3, usrTimeSteps, 2 * K + 2)  # the paper state that there is only (2K+2) X 100
-    central_first_axis = batch_size * N
+    input_size_user = (N, usrTimeSteps, 2 * K + 2)  # the paper state that there is only (2K+2) X 100
     input_size_central = (None, None, 2 * K + 2)
     model_path = r'saved_models/network_central'
     log_dir = r'log_dir/'
-    evaluate_log_dir = r'log_dir'
+    evaluate_log_dir = r'log_dir_evaluate'
     ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central/checkpoint'
     load_ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central/checkpoint'
+    best_ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central_best/checkpoint'
     Iterations = 10000
     Episodes = 100
     memory_size = 10000
@@ -27,9 +27,9 @@ class config:
 
     @staticmethod
     def learning_rate_schedule(epoch: int):
-        if epoch <= 250:
+        if epoch <= 50:
             return 5e-3
-        if 250 < epoch <= 500:
+        if 50 < epoch <= 500:
             return 1e-3
         if 500 < epoch <= 1500:
             return 5e-4
@@ -53,4 +53,4 @@ class config:
     def temperature_schedule(beta):
         # temperature starts at 1 and grows to 20 as the iterations increase
         # every 100 iterations we increase beta by 1
-        return min(beta + 0.01, 25)
+        return min(beta + 0.01, 20)

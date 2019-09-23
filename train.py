@@ -10,41 +10,6 @@ from Memory import ExperienceReplay, Memory
 from collections import deque
 
 
-# def createUserNets(users):
-#     userNets = []
-#     for usr in range(users):
-#        # userNets.append(DQSA(input_size=config.input_size_user, usernet=True))
-#         userNets.append(DQSAVersion2(input_size=config.input_size_user, usernet=True))
-#     return userNets
-#
-#
-# def initialize_history_input(users, env):
-#     """
-#     this function is suitable when config.useUserHistory is True
-#     :param users: number of users
-#     :param env:
-#     :return: an initialized history
-#     """
-#     history_input = deque(maxlen=config.usrTimeSteps)
-#     for tstep in range(config.usrTimeSteps):
-#         # for usr in range(users):
-#         #     rand_action = randrange(start=0, stop=config.Actions)
-#         #     env.step(action=rand_action, user=usr)
-#         # nextStateForEachUser, _ = env.getNextState()  # also resets the environment
-#         nextStateForEachUser = np.zeros((users, 1, 2 * config.K + 2)).astype(dtype=np.float32)
-#         history_input.append(nextStateForEachUser)
-#     return history_input
-
-#
-# def synchWithCentral(userNets, path=config.ckpt_path):
-#     """
-#     :param userNets:
-#     :return: userNets synched with central
-#     """
-#     for usr in userNets:
-#         usr.load_weights(path)
-
-
 def initCTP(time_slots=config.TimeSlots):
     channelThroughPutPerTstep = [[] for _ in range(time_slots + 2)]  # to restart each session we start and end
                                                                            # with zero
@@ -52,14 +17,6 @@ def initCTP(time_slots=config.TimeSlots):
     channelThroughPutPerTstep[-1].append(0)
     return channelThroughPutPerTstep
 
-
-def resetUserStates(userNets):
-    """
-    :param userNets:
-    :return: usernets with resetted initial states for the lstm layer
-    """
-    for usrNet in userNets:
-        usrNet.reset_states()
 
 def getAction(Qvalues, temperature, alpha):
     """
@@ -90,18 +47,22 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
     logger.info("start_training")
     Tensorcallback = callbacks['tensorboard']
     env = OneTimeStepEnv()
-    alpha = 1.0
-    beta = 1
+    alpha = 0.0
+    beta = 20
     #userNets = createUserNets(config.N)
     userNet = DQSAVersion2(input_size=config.input_size_user, usernet=True)
     # synchWithCentral(userNets=userNets, path=config.load_ckpt_path)
     # actionThatUsersChose = np.zeros((config.N, 1))
     ER = ExperienceReplay()
+    best_channel_throughput_so_far = 0
     channelThroughPutPerTstep = initCTP()  # init the data structure to view the mean reward at each t
     for iteration in range(config.Iterations):
         # ----- start iteration loop -----
-        if (iteration + 1) % 5 == 0:
-            centralTarget.load_weights(config.ckpt_path)  # target synch with central,
+        if (iteration + 1) % 2 == 0:
+            if best_channel_throughput_so_far > 0.9:
+                centralTarget.load_weights(config.best_ckpt_path)  # target synch with central
+            else:
+                centralTarget.load_weights(config.ckpt_path)
             logger.info("TargetNet synched")
         channelThroughPutMean = 0
         loss_value = []
@@ -122,12 +83,6 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
                 actionThatUsersChose = [getAction(Qvalues=UserQvalue, temperature=beta, alpha=alpha) for UserQvalue in UserQvalues]
                 for usr in range(config.N):
                     env.step(action=actionThatUsersChose[usr], user=usr)
-                # for usr in range(config.N):  # each usr interacts with the env in this loo
-                #     usr_state = Xt[usr]
-                #     Qvalues = userNets[usr](usr_state)  # inserting the state to the stateful DQSA
-                #     action = getAction(Qvalues=np.squeeze(Qvalues), temperature=beta, alpha=alpha)
-                #     actionThatUsersChose[usr] = action  # saving the action at time step tstep
-                #     env.step(action=action, user=usr)  # each user interact with the env by choosing an action
                 nextStateForEachUser, rewardForEachUser, ack_vector = env.getNextState()  # also resets the env for the next t step
                 episodeMemory.addTimeStepExperience(state=Xt, nextState=nextStateForEachUser,
                                                     rewards=rewardForEachUser, actions=np.squeeze(actionThatUsersChose))
@@ -167,8 +122,10 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
                 loss_value.append(loss)
                 centralNet.save_weights(config.ckpt_path)  # save new weights (new policy) in ckpt_path
                 ER.flush()  # clear out the ER after use
-                #synchWithCentral(userNets)  # sync with central to get the new policy
-                userNet.load_weights(path=config.ckpt_path)
+                if best_channel_throughput_so_far > 0.9:
+                    userNet.load_weights(config.best_ckpt_path)  # target synch with central
+                else:
+                    userNet.load_weights(path=config.ckpt_path)
                 # resetUserStates(userNets)  # reset the user's lstm states
         # ----- end episode loop -----
         channelThroughPutMean /= config.Episodes // config.debug_freq
@@ -193,6 +150,9 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
         Tensorcallback.on_epoch_end(epoch=iteration, logs=logs)
         beta = config.temperature_schedule(beta=beta)
         alpha = lower_epsilon(alpha)  # lowering the exploration rate
+        if best_channel_throughput_so_far < channelThroughPutMean:
+            best_channel_throughput_so_far = channelThroughPutMean
+            centralNet.save_weights(config.best_ckpt_path)
         # ----- end iteration loop -----
 
 
