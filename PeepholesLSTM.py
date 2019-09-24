@@ -7,4 +7,4 @@ from config import config
 
 def PeepholesLSTM(units=config.LstmUnits, stateful=True, return_sequences=True):
     lstmcell = PeepholeLSTMCell(units=units)
-    return RNN(cell=lstmcell, return_sequences=True, stateful=stateful)
+    return RNN(cell=lstmcell, return_sequences=return_sequences, stateful=stateful)

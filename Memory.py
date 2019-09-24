@@ -1,7 +1,7 @@
 import random
 from collections import namedtuple
 from config import config
-
+import numpy as np
 Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state'])
 SequenceExperience = namedtuple('SequenceExperience', ['state', 'action', 'reward', 'next_state'])
 

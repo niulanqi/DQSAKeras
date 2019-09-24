@@ -1,8 +1,16 @@
 
+from random import randrange
+
+
+def N_rand(start=2, stop=4):
+    return randrange(start=start, stop=stop)
+    # return 3
+
+
 class config:
-    N = 3  # number of users
+    N = 4  # number of users
     K = 1  # number of channels
-    TimeSlots = 75
+    TimeSlots = 50
     TimeSlotsEvaluate = 200
     Actions = K + 1
     batch_size = 4
@@ -11,13 +19,14 @@ class config:
     usrTimeSteps = 1
     input_size_user = (N, usrTimeSteps, 2 * K + 2)  # the paper state that there is only (2K+2) X 100
     input_size_central = (None, None, 2 * K + 2)
-    model_path = r'saved_models/network_central'
-    log_dir = r'log_dir/'
+    model_path = r'saved_models/network_central_network_central_dynamic_users'
+    log_dir = r'log_dir_network_central_dynamic_users/'
     evaluate_log_dir = r'log_dir_evaluate'
-    ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central/checkpoint'
-    load_ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central/checkpoint'
-    best_ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central_best/checkpoint'
+    ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central_dynamic_users/checkpoint'
+    load_ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central_dynamic_users/checkpoint'
+    best_ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central_best_dynamic_users/checkpoint'
     Iterations = 10000
+    evaluate_iterations = 5
     Episodes = 100
     memory_size = 10000
     Gamma = 0.95
@@ -27,11 +36,11 @@ class config:
 
     @staticmethod
     def learning_rate_schedule(epoch: int):
-        if epoch <= 50:
+        if epoch <= 10:
             return 5e-3
-        if 50 < epoch <= 500:
+        if 10 < epoch <= 100:
             return 1e-3
-        if 500 < epoch <= 1500:
+        if 100 < epoch <= 1500:
             return 5e-4
         if 1500 < epoch <= 2000:
             return 1e-4
@@ -54,3 +63,5 @@ class config:
         # temperature starts at 1 and grows to 20 as the iterations increase
         # every 100 iterations we increase beta by 1
         return min(beta + 0.01, 20)
+
+

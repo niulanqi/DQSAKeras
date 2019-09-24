@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.python.keras import callbacks
-from config import config
+from config import config, N_rand
 import os
 from model import DQSAVersion2
 from logger_utils import get_logger
@@ -8,7 +8,7 @@ from Environment import OneTimeStepEnv
 import numpy as np
 from Memory import ExperienceReplay, Memory
 from collections import deque
-
+from time import time
 
 def initCTP(time_slots=config.TimeSlots):
     channelThroughPutPerTstep = [[] for _ in range(time_slots + 2)]  # to restart each session we start and end
@@ -28,7 +28,6 @@ def getAction(Qvalues, temperature, alpha):
     softmaxValues = tf.nn.softmax(logits=(Qvalues - np.max(Qvalues) * np.ones_like(Qvalues)) * temperature)
     action_dist = (1 - alpha) * softmaxValues + alpha * (1 / config.Actions) * (np.ones_like(softmaxValues))
     action = np.squeeze(np.random.choice(config.Actions, p=np.squeeze(action_dist).ravel()))
-    # action = np.argmax(action_dist)
     return action
 
 
@@ -46,17 +45,16 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
     """
     logger.info("start_training")
     Tensorcallback = callbacks['tensorboard']
-    env = OneTimeStepEnv()
     alpha = 0.0
     beta = 20
-    #userNets = createUserNets(config.N)
-    userNet = DQSAVersion2(input_size=config.input_size_user, usernet=True)
-    # synchWithCentral(userNets=userNets, path=config.load_ckpt_path)
-    # actionThatUsersChose = np.zeros((config.N, 1))
     ER = ExperienceReplay()
     best_channel_throughput_so_far = 0
     channelThroughPutPerTstep = initCTP()  # init the data structure to view the mean reward at each t
+    num_of_users = N_rand()
+    userNet = DQSAVersion2(input_size=config.input_size_user, usernet=True, batch_size=num_of_users)
+    env = OneTimeStepEnv(numOfUsers=num_of_users)
     for iteration in range(config.Iterations):
+        # changing the number of users
         # ----- start iteration loop -----
         if (iteration + 1) % 2 == 0:
             if best_channel_throughput_so_far > 0.9:
@@ -72,16 +70,21 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
         idle_times = 0
         channelThroughPut = 0
         for episode in range(config.Episodes):
+            if iteration > 0:
+                num_of_users = N_rand(start=3, stop=11)
+                if num_of_users != userNet.get_batch_size():
+                    userNet = DQSAVersion2(input_size=config.input_size_user, usernet=True, batch_size=num_of_users)
+                    env = OneTimeStepEnv(numOfUsers=num_of_users)
+                    userNet.load_weights(path=config.ckpt_path)
             # ----- start episode loop -----
-            episodeMemory = Memory(numOfUsers=config.N)  # initialize a memory for the episode
+            episodeMemory = Memory(numOfUsers=num_of_users)  # initialize a memory for the episode
             Xt = env.reset()
-            userNet.reset_states()
             # Xt = np.expand_dims(Xt, axis=1)
             for tstep in range(config.TimeSlots):
                 # ----- start time-steps loop -----
                 UserQvalues = userNet(Xt)
                 actionThatUsersChose = [getAction(Qvalues=UserQvalue, temperature=beta, alpha=alpha) for UserQvalue in UserQvalues]
-                for usr in range(config.N):
+                for usr in range(num_of_users):
                     env.step(action=actionThatUsersChose[usr], user=usr)
                 nextStateForEachUser, rewardForEachUser, ack_vector = env.getNextState()  # also resets the env for the next t step
                 episodeMemory.addTimeStepExperience(state=Xt, nextState=nextStateForEachUser,
@@ -96,8 +99,8 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
                 channelThroughPut += ack_sum
                 # ----- end time-steps loop -----
             # the episode has ended so we add the episode memory to ER and reset the usr states
+            userNet.reset_states()
             ER.add_memory(memory=episodeMemory)  # after the tstep loop we insert the episode experience into the ER
-            #resetUserStates(userNets)  # reset the user's lstm states
             if (episode + 1) % config.debug_freq == 0:  # for debugging purposes, please ignore
                 collisons /= config.TimeSlots * config.debug_freq
                 idle_times /= config.TimeSlots * config.debug_freq
@@ -122,10 +125,7 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
                 loss_value.append(loss)
                 centralNet.save_weights(config.ckpt_path)  # save new weights (new policy) in ckpt_path
                 ER.flush()  # clear out the ER after use
-                if best_channel_throughput_so_far > 0.9:
-                    userNet.load_weights(config.best_ckpt_path)  # target synch with central
-                else:
-                    userNet.load_weights(path=config.ckpt_path)
+                userNet.load_weights(path=config.ckpt_path)
                 # resetUserStates(userNets)  # reset the user's lstm states
         # ----- end episode loop -----
         channelThroughPutMean /= config.Episodes // config.debug_freq
@@ -150,13 +150,25 @@ def trainDqsa(callbacks, logger, centralNet:DQSAVersion2, centralTarget:DQSAVers
         Tensorcallback.on_epoch_end(epoch=iteration, logs=logs)
         beta = config.temperature_schedule(beta=beta)
         alpha = lower_epsilon(alpha)  # lowering the exploration rate
-        if best_channel_throughput_so_far < channelThroughPutMean:
+        if channelThroughPutMean < 0.05:  # need to explore
+            alpha = 1.0
+        if best_channel_throughput_so_far > 0.9:
             best_channel_throughput_so_far = channelThroughPutMean
             centralNet.save_weights(config.best_ckpt_path)
         # ----- end iteration loop -----
 
 
 if __name__ == '__main__':
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
     if not os.path.exists(config.log_dir):
         os.makedirs(config.log_dir)
     if not os.path.exists(config.model_path):
@@ -165,7 +177,7 @@ if __name__ == '__main__':
     # centralNet = DQSA(input_size=config.input_size_central, usernet=False)
     loss = tf.compat.v2.losses.mean_squared_error
     centralNet = DQSAVersion2(input_size=config.input_size_central, usernet=False, optimizer=optimizer,
-                              loss=loss)
+                              loss=loss, batch_size=None)
     # centralNet.define_loss(loss=loss)
     # centralNet.define_optimizer(optimizer=optimizer)
     logger = get_logger(os.path.join(config.log_dir, "train_log"))
@@ -174,7 +186,7 @@ if __name__ == '__main__':
     Tensorcallback.set_model(centralNet.model)
     callbacks = {'tensorboard': Tensorcallback}
     DQSATarget = DQSAVersion2(input_size=config.input_size_central, usernet=False, optimizer=optimizer,
-                              loss=loss)
+                              loss=loss, batch_size=None)
     # centralNet.load_weights(path=config.load_ckpt_path)
     # DQSATarget.load_weights(path=config.load_ckpt_path)
     trainDqsa(callbacks, logger, centralNet, DQSATarget)

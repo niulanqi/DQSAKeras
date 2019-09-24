@@ -9,8 +9,26 @@ from random import randrange
 from PeepholesLSTM import PeepholesLSTM
 
 
-def dqsa(usernet, input_size):
-    input_layer = Input(shape=input_size[1:], batch_size=input_size[0])
+def processing_experience(exp_batch):
+    states_processed = []
+    actions_processed = []
+    next_states_processed = []
+    rewards_processed = []
+    for exp in exp_batch:
+        states_processed.extend(exp.state)
+        actions_processed.extend(exp.action)
+        next_states_processed.extend(exp.next_state)
+        rewards_processed.extend(exp.reward)
+    states_processed = np.squeeze(np.asarray(states_processed))
+    actions_processed = np.squeeze(np.asarray(actions_processed))
+    next_states_processed = np.squeeze(np.asarray(next_states_processed))
+    rewards_processed = np.squeeze(np.asarray(rewards_processed))
+    next_states_processed = np.concatenate((np.expand_dims(states_processed[:, 0, :], axis=1), next_states_processed),
+                                           axis=1)
+    return states_processed, actions_processed, next_states_processed, rewards_processed
+
+def dqsa(usernet, input_size, batch_size):
+    input_layer = Input(shape=input_size[1:], batch_size=batch_size)
     lstm_layer = PeepholesLSTM(units=config.LstmUnits, stateful=usernet, return_sequences=True)(input_layer) # allows better timing
     streamAC = TimeDistributed(Dense(units=10, activation=tanh), input_shape=(input_size[1], config.LstmUnits))(lstm_layer)
     streamVC = TimeDistributed(Dense(units=10, activation=tanh), input_shape=(input_size[1], config.LstmUnits))(lstm_layer)
@@ -142,9 +160,13 @@ def dqsa(usernet, input_size):
 
 
 class DQSAVersion2:
-    def __init__(self, input_size, usernet, optimizer=tf.compat.v2.optimizers.Adam(), loss=tf.compat.v2.losses.mean_squared_error):
-        self.model = dqsa(usernet, input_size)
+    def __init__(self, input_size, usernet, batch_size, optimizer=tf.compat.v2.optimizers.Adam(), loss=tf.compat.v2.losses.mean_squared_error):
+        self.batch_size = batch_size
+        self.model = dqsa(usernet, input_size, batch_size=batch_size)
         self.model.compile(optimizer=optimizer, loss=loss)
+
+    def get_batch_size(self):
+        return self.batch_size
 
     @tf.function
     def __call__(self, inputs):
@@ -166,17 +188,7 @@ class DQSAVersion2:
             seq_len = config.TimeSlots  # following the paper
             #  seq_len = randrange(start=5, stop=config.TimeSlots)
             exp_batch = ER.getMiniBatch(batch_size=config.batch_size, seq_length=seq_len)
-            states = np.squeeze(np.asarray([exp.state for exp in exp_batch]))
-            actions = np.squeeze(np.asarray([exp.action for exp in exp_batch]))
-            next_states = np.squeeze(np.asarray([exp.next_state for exp in exp_batch]))
-            rewards = np.squeeze(np.asarray([exp.reward for exp in exp_batch]))
-            next_states = np.concatenate((np.expand_dims(states[:, :, 0, :], axis=2), next_states), axis=2)
-            # concatenating the first state to the next state sequence to get the "NEXT STATE" expression
-            # reshaping the experiences to be ( number_of_users * batch size , 50/51, 2K + 2)
-            states_processed = np.reshape(states, newshape=[-1, states.shape[2], states.shape[3]])
-            actions_processed = np.reshape(actions, [-1, actions.shape[2]])
-            rewards_processed = np.reshape(rewards, [-1, rewards.shape[2]])
-            next_states_processed = np.reshape(next_states, newshape=[-1, next_states.shape[2], next_states.shape[3]])
+            states_processed, actions_processed, next_states_processed, rewards_processed = processing_experience(exp_batch)
             # done organizing data to shape (number_of_users * batch size , 50, 2K + 2)
             target_vector = self(states_processed)
             target_vector = target_vector.numpy()

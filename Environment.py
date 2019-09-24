@@ -80,7 +80,7 @@ class Env:
                 # Channel is been used by only one user there for there is No Collision
                 self.statePerUser[user, -1] = TRANSMISSION  # ACK received
                 self.statePerUser[:, self.numOfChannels + action] = 0  # The channel is being used the capacity is zero
-                self.reward_vector[:] = 1
+                self.reward_vector[user] = 1
             else:  # Collision occurred
                 indicesOfUsersThatChoseTheSameChannel = self.statePerUser[:, action] == TRANSMISSION
                 indicesOfUsersThatChoseTheSameChannel = indicesOfUsersThatChoseTheSameChannel.astype(np.int)
@@ -89,7 +89,7 @@ class Env:
                 self.statePerUser[:, self.numOfChannels + action] = 1
                 # the channel is not being used due to a collison so the capacity is one
                 self.statePerUser[indicesOfUsersThatChoseTheSameChannel, -1] = NO_TRANSMISSION  # ACK is zero
-                self.reward_vector[:] = -0.1
+                self.reward_vector[indicesOfUsersThatChoseTheSameChannel] = - 1e-3
         else:  # means no transmission
             self.statePerUser[user, NO_TRANSMISSION_SLOT] = 1
             self.statePerUser[user, -1] = 0  # ACK signal is 0 when not transmitting

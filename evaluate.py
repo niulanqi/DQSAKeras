@@ -45,8 +45,8 @@ def draw_heatmap(heatmap):
 
 
 if __name__ == '__main__':
-    userNet = DQSAVersion2(input_size=config.input_size_user, usernet=True)
-    userNet.load_weights(path="/home/dorliv/Desktop/DQSAKeras/successful_experiements/three_users/network_central_best_three_users/checkpoint")
+    userNet = DQSAVersion2(input_size=config.input_size_user, usernet=True, batch_size=config.N)
+    userNet.load_weights(path="/home/dorliv/Desktop/DQSAKeras/saved_models/network_central_best_dynamic_users/checkpoint")
     logger = get_logger(os.path.join(config.evaluate_log_dir, "evaluate_log"))
     Tensorcallback = callbacks.TensorBoard(config.evaluate_log_dir,
                                            write_graph=True, write_images=False)
@@ -54,9 +54,9 @@ if __name__ == '__main__':
     env = OneTimeStepEnv()
     beta = 10
     alpha = 0  # e_greedy
-    draw_heatmap_flag = False
+    draw_heatmap_flag = True
     channelThroughPutPerTstep = initCTP(config.TimeSlotsEvaluate)  # init the data structure to view the mean reward at each t
-    for iteration in range(5):
+    for iteration in range(config.evaluate_iterations):
         channelThroughPutMean = 0
         loss_value = []
         collisonsMean = 0
@@ -92,11 +92,11 @@ if __name__ == '__main__':
             channelThroughPutMean += channelThroughPut / config.TimeSlotsEvaluate
             print(
                 "Iteration {}/{}- Episode {}/{}:  collisions {}, idle_times {}, channelThroughput is {}"
-                    .format(iteration, 10, episode, config.Episodes, collisons / config.TimeSlotsEvaluate,
+                    .format(iteration, config.evaluate_iterations, episode, config.Episodes, collisons / config.TimeSlotsEvaluate,
                             idle_times / config.TimeSlotsEvaluate, channelThroughPut / config.TimeSlotsEvaluate))
             logger.info(
                 "Iteration {}/{}- Episode {}/{}:  collisions {}, idle_times {}, channelThroughput is {}"
-                    .format(iteration, 10, episode, config.Episodes, collisons / config.TimeSlotsEvaluate,
+                    .format(iteration, config.evaluate_iterations, episode, config.Episodes, collisons / config.TimeSlotsEvaluate,
                             idle_times / config.TimeSlotsEvaluate, channelThroughPut / config.TimeSlotsEvaluate))
 
         channelThroughPutPerTstep = [np.mean(x) for x in channelThroughPutPerTstep]
@@ -106,11 +106,11 @@ if __name__ == '__main__':
         channelThroughPutPerTstep = initCTP(config.TimeSlotsEvaluate)  # init the data structure
         print(
             "Iteration {}/{}  collisions {}, idle_times {}, channelThroughput is {}"
-                .format(iteration, 10, collisonsMean / config.Episodes,
+                .format(iteration, config.evaluate_iterations, collisonsMean / config.Episodes,
                         idle_timesMean / config.Episodes, channelThroughPutMean / config.Episodes))
         logger.info(
             "Iteration {}/{}  collisions {}, idle_times {}, channelThroughput is {}"
-                .format(iteration, 10, collisonsMean / config.Episodes,
+                .format(iteration, config.evaluate_iterations, collisonsMean / config.Episodes,
                         idle_timesMean / config.Episodes, channelThroughPutMean / config.Episodes))
 
 
