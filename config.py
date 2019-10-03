@@ -4,11 +4,11 @@ from random import randrange
 
 def N_rand(start=2, stop=4):
     return randrange(start=start, stop=stop)
-    # return 3
+     #return 3
 
 
 class config:
-    N = 4  # number of users
+    N = 3  # number of users
     K = 1  # number of channels
     TimeSlots = 50
     TimeSlotsEvaluate = 200
@@ -18,8 +18,8 @@ class config:
     train_iterations = 1
     usrTimeSteps = 1
     input_size_user = (N, usrTimeSteps, 2 * K + 2)  # the paper state that there is only (2K+2) X 100
-    input_size_central = (None, None, 2 * K + 2)
-    model_path = r'saved_models/network_central_network_central_dynamic_users'
+    input_size_central = (None, TimeSlots, 2 * K + 2)
+    model_path = r'saved_models/network_central_dynamic_users'
     log_dir = r'log_dir_network_central_dynamic_users/'
     evaluate_log_dir = r'log_dir_evaluate'
     ckpt_path = r'/home/dorliv/Desktop/DQSAKeras/saved_models/network_central_dynamic_users/checkpoint'

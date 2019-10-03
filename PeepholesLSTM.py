@@ -5,6 +5,6 @@ from config import config
 
 
 
-def PeepholesLSTM(units=config.LstmUnits, stateful=True, return_sequences=True):
+def PeepholesLSTM(units=config.LstmUnits, batch_size=None,  stateful=True, return_sequences=True):
     lstmcell = PeepholeLSTMCell(units=units)
-    return RNN(cell=lstmcell, return_sequences=return_sequences, stateful=stateful)
+    return RNN(cell=lstmcell, return_sequences=return_sequences, stateful=stateful, batch_size=batch_size)

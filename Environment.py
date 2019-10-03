@@ -42,6 +42,7 @@ class Env:
         #   > 1 means collison
         self.statePerUser = np.matmul(np.ones((1, self.numOfUsers)).T, self.state).copy().astype(dtype=np.float32)   # (Nx1) * (1 X (2K + 2)) -> (Nx(2K+2))
         self.reward_vector = np.zeros(self.numOfUsers)
+        self.history_actions = np.zeros(self.numOfUsers)
         # self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
 
     def reset(self):
@@ -57,13 +58,18 @@ class Env:
         #     action = randrange(start=0, stop=self.numOfChannels + 1)
         #     self.step(action=action, user=usr)
         # randomized_first_state = self.statePerUser.astype(dtype=np.float32)
+        self.reward_vector = np.zeros(self.numOfUsers)
+        self.history_actions = np.zeros(self.numOfUsers)
+        randomized_first_state = self.reset_state()
+        return randomized_first_state
+
+    def reset_state(self):
         self.statePerUser = np.matmul(np.ones((1, self.numOfUsers)).T,
                                       self.state).copy().astype(dtype=np.float32)  # (Nx1) * (1 x (2K + 2)) -> Nx(2K+2)
-        self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
+        # self.statePerUser[:, NO_TRANSMISSION_SLOT] = 1
         randomized_first_state = np.zeros_like(self.statePerUser)  # according to the matlab script
         randomized_first_state[:, self.numOfChannels + 1: 2 * self.numOfChannels + 1] \
             = self.capacities
-        self.reward_vector = np.zeros(self.numOfUsers)
         return randomized_first_state
 
     def step(self, action, user):
@@ -74,22 +80,30 @@ class Env:
         """
         assert 0 <= action <= self.numOfChannels
         if action != 0:
+            self.history_actions[user] += 1
             self.statePerUser[user, NO_TRANSMISSION_SLOT] = 0  # the user chose to transmit
             self.statePerUser[user, action] = TRANSMISSION  # the user chose to transmit at channel "action"
             if np.sum(self.statePerUser[:, action]) <= TRANSMISSION:
                 # Channel is been used by only one user there for there is No Collision
                 self.statePerUser[user, -1] = TRANSMISSION  # ACK received
                 self.statePerUser[:, self.numOfChannels + action] = 0  # The channel is being used the capacity is zero
-                self.reward_vector[user] = 1
-            else:  # Collision occurred
-                indicesOfUsersThatChoseTheSameChannel = self.statePerUser[:, action] == TRANSMISSION
-                indicesOfUsersThatChoseTheSameChannel = indicesOfUsersThatChoseTheSameChannel.astype(np.int)
+                indices_of_users_that_chose_not_to_transmit = self.statePerUser[:, NO_TRANSMISSION_SLOT] == TRANSMISSION
+                indices_of_users_that_chose_not_to_transmit = indices_of_users_that_chose_not_to_transmit.astype(np.int)
                 # get all the users that transmitted on that channel and turn their ACK signal to 0
-                indicesOfUsersThatChoseTheSameChannel = np.argwhere(indicesOfUsersThatChoseTheSameChannel)
+                indices_of_users_that_chose_not_to_transmit = np.argwhere(indices_of_users_that_chose_not_to_transmit)
+                self.reward_vector[user] = 1 * (1 - self.history_actions[user] / config.TimeSlots)   # successful transmission
+                self.reward_vector[indices_of_users_that_chose_not_to_transmit] = 0.1  # did not interfere
+                # self.reward_vector[:] = 1
+            else:  # Collision occurred
+                indices_of_users_that_chose_the_same_channel = self.statePerUser[:, action] == TRANSMISSION
+                indices_of_users_that_chose_the_same_channel = indices_of_users_that_chose_the_same_channel.astype(np.int)
+                # get all the users that transmitted on that channel and turn their ACK signal to 0
+                indices_of_users_that_chose_the_same_channel = np.argwhere(indices_of_users_that_chose_the_same_channel)
                 self.statePerUser[:, self.numOfChannels + action] = 1
                 # the channel is not being used due to a collison so the capacity is one
-                self.statePerUser[indicesOfUsersThatChoseTheSameChannel, -1] = NO_TRANSMISSION  # ACK is zero
-                self.reward_vector[indicesOfUsersThatChoseTheSameChannel] = - 1e-3
+                self.statePerUser[indices_of_users_that_chose_the_same_channel, -1] = NO_TRANSMISSION  # ACK is zero
+                self.reward_vector[indices_of_users_that_chose_the_same_channel] = - 1e-3
+                # self.reward_vector[:] = -0.1
         else:  # means no transmission
             self.statePerUser[user, NO_TRANSMISSION_SLOT] = 1
             self.statePerUser[user, -1] = 0  # ACK signal is 0 when not transmitting
@@ -118,10 +132,11 @@ class OneTimeStepEnv(Env):
         return np.expand_dims(state.copy(), axis=1)
         # adding the time step dimension in the first axis
 
-    def getNextState(self):
+    def getNextState(self, num_of_active_users):
         nextState, reward_vector, ack_vector = super(OneTimeStepEnv, self).getNextState()
-        self.reset()
-        return np.expand_dims(nextState, axis=1).copy(), reward_vector, ack_vector
+        self.reset_state()
+        next_state = np.expand_dims(nextState, axis=1).copy()
+        return next_state, reward_vector[:num_of_active_users], ack_vector[:num_of_active_users]
 
 #
 #
